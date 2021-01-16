@@ -6,22 +6,21 @@ Metal vertex and fragment shaders.
 */
 
 #include <metal_stdlib>
-#include <simd/simd.h>
 
 using namespace metal;
 
-#import "AAPLShaderTypes.h"
+#include "AAPLShaderTypes.h"
 
 #pragma mark -
 
 #pragma mark - Shaders for simple pipeline used to render triangle to renderable texture
 
 // Vertex shader outputs and fragment shader inputs for simple pipeline
-typedef struct
+struct SimplePipelineRasterizerData
 {
     float4 position [[position]];
     float4 color;
-} SimplePipelineRasterizerData;
+};
 
 // Vertex shader which passes position and color through to rasterizer.
 vertex SimplePipelineRasterizerData
@@ -49,11 +48,11 @@ fragment float4 simpleFragmentShader(SimplePipelineRasterizerData in [[stage_in]
 #pragma mark Shaders for pipeline used texture from renderable texture when rendering to the drawable.
 
 // Vertex shader outputs and fragment shader inputs for texturing pipeline.
-typedef struct
+struct TexturePipelineRasterizerData
 {
     float4 position [[position]];
     float2 texcoord;
-} TexturePipelineRasterizerData;
+};
 
 // Vertex shader which adjusts positions by an aspect ratio and passes texture
 // coordinates through to the rasterizer.
