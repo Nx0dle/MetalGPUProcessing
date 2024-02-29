@@ -20,6 +20,7 @@ struct SimplePipelineRasterizerData
 {
     float4 position [[position]];
     float4 color;
+    float2 pos;
 };
 
 // Vertex shader which passes position and color through to rasterizer.
@@ -33,7 +34,8 @@ simpleVertexShader(const uint vertexID [[ vertex_id ]],
     out.position.xy = vertices[vertexID].position.xy;
 
     out.color = vertices[vertexID].color;
-
+    out.pos = vertices[vertexID].position.xy;
+    
     return out;
 }
 
@@ -41,6 +43,11 @@ simpleVertexShader(const uint vertexID [[ vertex_id ]],
 fragment float4 simpleFragmentShader(SimplePipelineRasterizerData in [[stage_in]])
 {
     return in.color;
+}
+
+fragment float4 negativeFragmentShader(SimplePipelineRasterizerData in [[stage_in]])
+{
+    return 1-in.color;
 }
 
 #pragma mark -
@@ -54,6 +61,8 @@ struct TexturePipelineRasterizerData
     float2 texcoord;
 };
 
+
+
 // Vertex shader which adjusts positions by an aspect ratio and passes texture
 // coordinates through to the rasterizer.
 vertex TexturePipelineRasterizerData
@@ -65,22 +74,64 @@ textureVertexShader(const uint vertexID [[ vertex_id ]],
 
     out.position = vector_float4(0.0, 0.0, 0.0, 1.0);
 
-    out.position.x = vertices[vertexID].position.x * aspectRatio;
+    out.position.x = vertices[vertexID].position.x;// * aspectRatio;
     out.position.y = vertices[vertexID].position.y;
 
     out.texcoord = vertices[vertexID].texcoord;
 
     return out;
 }
+
+
 // Fragment shader that samples a texture and outputs the sampled color.
-fragment float4 textureFragmentShader(TexturePipelineRasterizerData in      [[stage_in]],
-                                      texture2d<float>              texture [[texture(AAPLTextureInputIndexColor)]])
+fragment float4 textureFirstGaussShader(TexturePipelineRasterizerData in      [[stage_in]],
+                                      texture2d<float>              texture [[texture(0)]])
 {
-    sampler simpleSampler;
+    sampler simpleSampler(mip_filter::linear,
+                          mag_filter::linear,
+                          min_filter::linear,
+                          address::mirrored_repeat);
 
     // Sample data from the texture.
-    float4 colorSample = texture.sample(simpleSampler, in.texcoord);
+    float4 colorSample;
 
-    // Return the color sample as the final color.
+    float4 color = float4(0.0);
+    float sigma = 5.0, radius = 3.0 * sigma, weightSum = 0.0, x = 0.0;
+    
+    for (int y = -radius; y <= radius; y++) {
+        float2 offset = float2(y, x) / float2(texture.get_height(), texture.get_width());
+        float weight = exp(-(y * y) / (2.0 * sigma * sigma));
+        color += texture.sample(simpleSampler, in.texcoord.xy + offset) * weight;
+        weightSum += weight;
+    }
+    
+    colorSample = color / weightSum;
+
+    return colorSample;
+}
+
+fragment float4 textureSecondGaussShader(TexturePipelineRasterizerData in      [[stage_in]],
+                                      texture2d<float>              texture [[texture(1)]])
+{
+    sampler simpleSampler(mip_filter::linear,
+                          mag_filter::linear,
+                          min_filter::linear,
+                          address::mirrored_repeat);
+    
+    // Sample data from the texture.
+    float4 colorSample;
+    
+    float4 color = float4(0.0);
+    float sigma = 5.0, radius = 3.0 * sigma, weightSum = 0.0, y = 0.0;
+    
+    for (int x = -radius; x <= radius; x++) {
+        float2 offset = float2(y, x) / float2(texture.get_height(), texture.get_width());
+        float weight = exp(-(x * x) / (2.0 * sigma * sigma));
+        color += texture.sample(simpleSampler, in.texcoord.xy + offset) * weight;
+        weightSum += weight;
+    }
+    
+    colorSample = color / weightSum;
+    
     return colorSample;
 }
