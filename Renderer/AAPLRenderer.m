@@ -19,7 +19,7 @@ Implementation for a renderer class that performs Metal setup and
     id<MTLTexture> _renderTargetTexture2;
     id<MTLTexture> _textureFromFile;
 
-    // Render pass descriptor to draw to the texture
+    // Render pass descriptors to draw to the texture
     MTLRenderPassDescriptor* _renderToTextureRenderPassDescriptor_FBO;
     MTLRenderPassDescriptor* _renderToTextureRenderPassDescriptor_secondPass;
     
@@ -27,7 +27,7 @@ Implementation for a renderer class that performs Metal setup and
     id<MTLRenderPipelineState> _renderToTextureShaderRenderPipeline;
     id<MTLRenderPipelineState> _renderToTextureRenderPipeline;
 
-    // A pipeline object to render to the screen.
+    // A pipeline object to render to the screen / save tmp texture.
     id<MTLRenderPipelineState> _drawableRenderPipeline;
 
     // Ratio of width to height to scale positions in the vertex shader.
@@ -36,14 +36,10 @@ Implementation for a renderer class that performs Metal setup and
     id<MTLDevice> _device;
 
     id<MTLCommandQueue> _commandQueue;
-    
-    id<MTLTexture> _colorMap;
-    
-    float kawaseIter;
 }
 
 #pragma mark -
-#pragma mark Settings and pipeline
+#pragma mark Settings and pipelines
 
 - (nonnull instancetype)initWithMetalKitView:(nonnull MTKView *)mtkView
 {
@@ -55,6 +51,32 @@ Implementation for a renderer class that performs Metal setup and
         _device = mtkView.device;
 
         mtkView.clearColor = MTLClearColorMake(1.0, 1.0, 1.0, 1.0);
+        
+#pragma mark -
+#pragma mark Load texture from file
+        
+        {
+            NSURL *url = [NSURL fileURLWithPath:@"/Users/motionvfx/Documents/chessboard.jpeg"];
+            MTKTextureLoader *loader = [[MTKTextureLoader alloc] initWithDevice:_device];
+            
+            NSDictionary *options =
+            @{
+                MTKTextureLoaderOptionSRGB:                 @(false),
+                MTKTextureLoaderOptionGenerateMipmaps:      @(false),
+                MTKTextureLoaderOptionTextureUsage:         @(MTLTextureUsageShaderRead),
+                MTKTextureLoaderOptionTextureStorageMode:   @(MTLStorageModePrivate)
+            };
+            
+            _textureFromFile = [loader newTextureWithContentsOfURL:url options:options error:nil];
+            if(!_textureFromFile)
+            {
+                NSLog(@"Failed to create the texture from %@", url.absoluteString);
+                return nil;
+            }
+        }
+        
+#pragma mark -
+#pragma mark Set up command queue
 
         _commandQueue = [_device newCommandQueue];
 
@@ -68,16 +90,18 @@ Implementation for a renderer class that performs Metal setup and
                               MTLTextureUsageShaderRead |
                               MTLTextureUsageShaderWrite;
 
+        // Create textures from texture descriptor
         _renderTargetTexture = [_device newTextureWithDescriptor:texDescriptor];
         _renderTargetTexture2 = [_device newTextureWithDescriptor:texDescriptor];
         
-
+        // Set up FBO pass
         _renderToTextureRenderPassDescriptor_FBO = [MTLRenderPassDescriptor new];
         _renderToTextureRenderPassDescriptor_FBO.colorAttachments[0].texture = _renderTargetTexture;
         _renderToTextureRenderPassDescriptor_FBO.colorAttachments[0].loadAction = MTLLoadActionClear;
         _renderToTextureRenderPassDescriptor_FBO.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0);
         _renderToTextureRenderPassDescriptor_FBO.colorAttachments[0].storeAction = MTLStoreActionStore;
         
+        // Set up next passes
         _renderToTextureRenderPassDescriptor_secondPass = [MTLRenderPassDescriptor new];
         _renderToTextureRenderPassDescriptor_secondPass.colorAttachments[0].texture = _renderTargetTexture;
         _renderToTextureRenderPassDescriptor_secondPass.colorAttachments[0].loadAction = MTLLoadActionLoad;
@@ -88,6 +112,7 @@ Implementation for a renderer class that performs Metal setup and
 
         MTLRenderPipelineDescriptor *pipelineStateDescriptor = [[MTLRenderPipelineDescriptor alloc] init];
         
+        // Pipeline for FBO pass (texture load pass)
         pipelineStateDescriptor.label = @"Offscreen Render texture render pipeline";
         pipelineStateDescriptor.sampleCount = 1;
         pipelineStateDescriptor.vertexFunction =  [defaultLibrary newFunctionWithName:@"textureVertexShader"];
@@ -96,7 +121,7 @@ Implementation for a renderer class that performs Metal setup and
         _renderToTextureRenderPipeline = [_device newRenderPipelineStateWithDescriptor:pipelineStateDescriptor error:&error];
         NSAssert(_renderToTextureRenderPipeline, @"Failed to create pipeline state to render to screen: %@", error);
         
-        
+        // Pipeline for next passes
         pipelineStateDescriptor.label = @"Offscreen Render texture shader pipeline";
         pipelineStateDescriptor.sampleCount = 1;
         pipelineStateDescriptor.vertexFunction =  [defaultLibrary newFunctionWithName:@"textureVertexShader"];
@@ -105,7 +130,7 @@ Implementation for a renderer class that performs Metal setup and
         _renderToTextureShaderRenderPipeline = [_device newRenderPipelineStateWithDescriptor:pipelineStateDescriptor error:&error];
         NSAssert(_renderToTextureShaderRenderPipeline, @"Failed to create pipeline state to render to screen: %@", error);
         
-        
+        // Pipeline for texture render to view
         pipelineStateDescriptor.label = @"Drawable Render Pipeline";
         pipelineStateDescriptor.sampleCount = mtkView.sampleCount;
         pipelineStateDescriptor.vertexFunction =  [defaultLibrary newFunctionWithName:@"textureVertexShader"];
@@ -115,28 +140,6 @@ Implementation for a renderer class that performs Metal setup and
         _drawableRenderPipeline = [_device newRenderPipelineStateWithDescriptor:pipelineStateDescriptor error:&error];
         NSAssert(_drawableRenderPipeline, @"Failed to create pipeline state to render to screen: %@", error);
     }
-    
-    {
-        NSURL *url = [NSURL fileURLWithPath:@"/Users/motionvfx/Documents/chessboard.jpeg"];
-        MTKTextureLoader *loader = [[MTKTextureLoader alloc] initWithDevice:_device];
-        
-        NSDictionary *options =
-        @{
-            MTKTextureLoaderOptionSRGB:                 @(false),
-            MTKTextureLoaderOptionGenerateMipmaps:      @(false),
-            MTKTextureLoaderOptionTextureUsage:         @(MTLTextureUsageShaderRead),
-            MTKTextureLoaderOptionTextureStorageMode:   @(MTLStorageModePrivate)
-        };
-        
-        _textureFromFile = [loader newTextureWithContentsOfURL:url options:options error:nil];
-        if(!_textureFromFile)
-        {
-            NSLog(@"Failed to create the texture from %@", url.absoluteString);
-            return nil;
-        }
-    }
-        
-    
     return self;
 }
 
@@ -187,7 +190,7 @@ Implementation for a renderer class that performs Metal setup and
         [renderEncoder endEncoding];
     }
     
-    for (float i = 0; i < 5; i++) {
+    for (float kawaseIter = 0; kawaseIter < 4; kawaseIter++) {
         id<MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:_renderToTextureRenderPassDescriptor_secondPass];
         renderEncoder.label = @"Offscreen render shader pass";
         [renderEncoder setRenderPipelineState:_renderToTextureShaderRenderPipeline];
@@ -196,8 +199,8 @@ Implementation for a renderer class that performs Metal setup and
                                length:sizeof(quadVertices)
                               atIndex:AAPLVertexInputIndexVertices];
         
-        [renderEncoder setFragmentBytes:&i
-                                 length:sizeof(i)
+        [renderEncoder setFragmentBytes:&kawaseIter
+                                 length:sizeof(kawaseIter)
                                 atIndex:kawaseIterator];
         
         [renderEncoder setFragmentTexture:_renderTargetTexture atIndex:1];
@@ -210,7 +213,7 @@ Implementation for a renderer class that performs Metal setup and
         
         
 #pragma mark -
-#pragma mark Draw texture to view
+#pragma mark Draw texture to view / store tmp texture
         
         MTLRenderPassDescriptor *drawableRenderPassDescriptor = view.currentRenderPassDescriptor;
         if(drawableRenderPassDescriptor != nil)
@@ -224,8 +227,8 @@ Implementation for a renderer class that performs Metal setup and
                                    length:sizeof(quadVertices)
                                   atIndex:AAPLVertexInputIndexVertices];
             
-            [renderEncoder setFragmentBytes:&i
-                                     length:sizeof(i)
+            [renderEncoder setFragmentBytes:&kawaseIter
+                                     length:sizeof(kawaseIter)
                                     atIndex:kawaseIterator];
             
             
@@ -243,6 +246,9 @@ Implementation for a renderer class that performs Metal setup and
         }
     }
 
+#pragma mark -
+#pragma mark Present texture to view
+    
     [commandBuffer presentDrawable:view.currentDrawable];
     [commandBuffer commit];
 }
