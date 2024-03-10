@@ -15,6 +15,7 @@ typedef enum AAPLVertexInputIndex
 {
     AAPLVertexInputIndexVertices    = 0,
     AAPLVertexInputIndexAspectRatio = 1,
+    kawaseIterator = 2,
 } AAPLVertexInputIndex;
 
 typedef enum AAPLTextureInputIndex
